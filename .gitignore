@@ -1,5 +1,16 @@
-#Esempio
-Notebook-rag-Base-esempio.ipynb
+# Ambiente virtuale
+.venv/
+venv/
+env/
 
-# Privato
+# Chiavi e variabili sensibili
+.env
+
+# Cache di Python e Jupyter
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# File di lavoro locali ed esempi
+Notebook-rag-Base-esempio.ipynb
 rag_base.ipynb

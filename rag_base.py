@@ -10,19 +10,37 @@ from chromadb.utils import embedding_functions
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-# 1. Configurazione Ambiente e Client Groq
-# Cerca il file .env sia nella cartella corrente che nella cartella padre
-load_dotenv(override=True)
-load_dotenv(dotenv_path="../.env", override=True)
+# Directory base dello script (garantisce percorsi assoluti corretti ovunque venga eseguito)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-groq_api_key = os.environ.get("GROQ_API_KEY")
-if not groq_api_key:
-    raise ValueError("GROQ_API_KEY non trovata nel file .env!")
+# 1. Configurazione Ambiente e Client LLM
+# Cerca il file .env sia nella cartella corrente del progetto che nella cartella padre
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+load_dotenv(os.path.join(BASE_DIR, "..", ".env"), override=True)
 
-client = OpenAI(
-    base_url="https://api.groq.com/openai/v1",
-    api_key=groq_api_key
-)
+groq_key = os.environ.get("GROQ_API_KEY")
+openai_key = os.environ.get("OPENAI_API_KEY")
+
+if groq_key:
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=groq_key
+    )
+    llm_model = "openai/gpt-oss-120b"
+elif openai_key and openai_key.startswith("sk-"):
+    client = OpenAI(api_key=openai_key)
+    llm_model = "gpt-4o-mini"
+elif openai_key:
+    # Caso in cui una chiave Groq (gsk_...) sia salvata in OPENAI_API_KEY
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=openai_key
+    )
+    llm_model = "openai/gpt-oss-120b"
+else:
+    raise ValueError(
+        "Nessuna API key trovata! Assicurati di impostare GROQ_API_KEY (o OPENAI_API_KEY) nel file .env."
+    )
 
 
 # 2. Funzione Estrazione Informazioni Strutturate
@@ -43,7 +61,7 @@ Estratto CV:
 {testo_cv}
 """
     response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+        model=llm_model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0
     )
@@ -51,7 +69,10 @@ Estratto CV:
 
 
 # 3. Lettura Documenti e Chunking
-def carica_documenti(documents_dir: str = "resumes"):
+def carica_documenti(documents_dir: str = None):
+    if documents_dir is None:
+        documents_dir = os.path.join(BASE_DIR, "resumes")
+
     documents = []
     metadatas = []
     ids = []
@@ -86,17 +107,26 @@ def carica_documenti(documents_dir: str = "resumes"):
 # 4. Pipeline Principale RAG
 def main():
     # Caricamento e chunking dei CV
-    documents, metadatas, ids = carica_documenti("resumes")
+    documents, metadatas, ids = carica_documenti()
     if not documents:
         print("Nessun documento trovato da indicizzare.")
         return
 
-    # Inizializzazione Embedder con Ollama
-    print("Inizializzazione Embedder con Ollama (embeddinggemma-2:270m)...")
-    embedder = embedding_functions.OllamaEmbeddingFunction(
-        url="http://localhost:11434",
-        model_name="embeddinggemma-2:270m"
-    )
+    # Inizializzazione Embedder
+    # Utilizza Ollama (embeddinggemma-2:270m) con fallback a DefaultEmbeddingFunction se non raggiungibile
+    print("Inizializzazione Embedder...")
+    try:
+        embedder = embedding_functions.OllamaEmbeddingFunction(
+            url="http://localhost:11434",
+            model_name="embeddinggemma-2:270m"
+        )
+        # Test rapido di connettività a Ollama
+        embedder(["test_ping"])
+        print("Embedder attivo: Ollama (embeddinggemma-2:270m)")
+    except Exception as e:
+        print(f"Avviso: Ollama non raggiungibile ({e}).")
+        print("Utilizzo fallback all'Embedder integrato locale di ChromaDB.")
+        embedder = embedding_functions.DefaultEmbeddingFunction()
 
     # Inizializzazione ChromaDB e Popolamento Collezione
     print("Creazione collezione ChromaDB e indicizzazione dei frammenti...")
@@ -146,10 +176,10 @@ Istruzioni per la risposta:
 3. Concludi indicando in modo ordinato i contatti del candidato disponibili per organizzare il colloquio.
 """
 
-    # Generazione Risposta con Groq
-    print("Generazione raccomandazione con Groq (openai/gpt-oss-120b)...")
+    # Generazione Risposta con LLM
+    print(f"Generazione raccomandazione con {llm_model}...")
     completion = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+        model=llm_model,
         messages=[
             {
                 "role": "system",

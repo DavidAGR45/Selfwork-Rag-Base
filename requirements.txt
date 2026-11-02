@@ -2,3 +2,4 @@ chromadb
 openai
 python-dotenv
 ipykernel
+ollama
